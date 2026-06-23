@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="color-scheme" content="light">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Quality Grapes</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --g-deep:  #1a3a2a;
+  --g-mid:   #2d5a3d;
+  --g-light: #7db88a;
+  --cream:   #f5f0e8;
+  --cdark:   #ede6d8;
+  --gold:    #c4922a;
+  --goldf:   #e8b84b;
+  --red:     #b83232;
+  --border:  rgba(0,0,0,0.08);
+  --tab-h:   56px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html { background: #f0ebe2; color-scheme: light; }
+body { font-family: 'DM Sans', sans-serif; background: #f0ebe2 !important; min-height: 100dvh; color-scheme: light; -webkit-color-scheme: light; }
+
+@media (prefers-color-scheme: dark) {
+  html, body { background: #f0ebe2 !important; color: #1a1a1a !important; }
+  .card { background: #ffffff !important; }
+  .card-body { background: #ffffff !important; }
+  .card-head { background: #1a3a2a !important; }
+  .field input[type="text"], .field input[type="number"] { background: #f5f0e8 !important; color: #b83232 !important; border-color: #e0d8cc !important; }
+  .field .computed { background: rgba(45,90,61,.1) !important; color: #2d5a3d !important; border-color: rgba(45,90,61,.2) !important; }
+  .field .computed.est { background: rgba(196,146,42,.12) !important; color: #c4922a !important; }
+  .field label { color: #999 !important; }
+  .field label.lbl-auto { color: #2d5a3d !important; }
+  .field label.lbl-est { color: #c4922a !important; }
+  .card-divider { background: #ede6d8 !important; }
+  .tabbar { background: #ffffff !important; }
+  .tab { color: #999 !important; }
+  .tab.active { color: #2d5a3d !important; }
+  .resumo-table { background: #ffffff !important; }
+  .resumo-row { background: #ffffff !important; }
+  .resumo-row span { color: #333 !important; }
+}
+
+.header {
+  background: var(--g-deep);
+  padding: 14px 16px 12px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  border-bottom: 2px solid var(--gold);
+  position: sticky; top: 0; z-index: 50;
+}
+.header h1 { color: var(--cream); font-size: 15px; font-weight: 600; }
+.header p  { color: var(--g-light); font-size: 9px; font-weight: 300; letter-spacing:.08em; text-transform:uppercase; margin-top:1px; }
+
+.total-bar {
+  background: var(--g-mid); padding: 9px 16px;
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; z-index: 48;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.total-bar .lbl { color: var(--g-light); font-size: 9px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; }
+.total-bar .val { color: var(--goldf); font-family:'DM Mono',monospace; font-size:18px; font-weight:700; }
+.total-bar .val span { font-size:10px; color:var(--g-light); margin-left:3px; }
+
+/* Sync status */
+.sync-bar {
+  background: #fff8e7; border-bottom: 1px solid #f0d080;
+  padding: 5px 16px; display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: #856404; font-weight: 500;
+  position: sticky; z-index: 47;
+}
+.sync-bar.ok   { background: #e8f5e9; border-color: #a5d6a7; color: #2d5a3d; }
+.sync-bar.err  { background: #fdecea; border-color: #f5c6cb; color: #842029; }
+.sync-dot { width:7px; height:7px; border-radius:50%; background:currentColor; flex-shrink:0; }
+
+.screen { display: none; padding-bottom: calc(var(--tab-h) + 20px); }
+.screen.active { display: block; }
+
+/* ── CARDS ── */
+.cards { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.card { background: #fff; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 0 0 1px var(--border); overflow: hidden; }
+
+.card-head {
+  background: #1a3a2a !important;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px;
+}
+.card-head-left { display: flex; align-items: flex-start; flex-direction: column; gap: 2px; }
+.parcela-input {
+  background: transparent !important; border: none !important;
+  border-bottom: 1.5px solid rgba(255,255,255,.3) !important;
+  border-radius: 0 !important; outline: none !important;
+  font-family: 'DM Mono',monospace !important; font-weight:700 !important; font-size:22px !important;
+  color: #f5f0e8 !important; height: auto !important;
+  padding: 0 0 4px 0 !important; width: 120px !important;
+}
+.parcela-input::placeholder { color: rgba(255,255,255,.3) !important; }
+.prod-badge {
+  background: rgba(255,255,255,.08); border: 1.5px solid rgba(255,255,255,.25);
+  border-radius: 20px; padding: 5px 14px;
+  font-family: 'DM Mono',monospace; font-size:13px; font-weight:600;
+  color: rgba(255,255,255,.7); white-space:nowrap; flex-shrink:0;
+}
+.prod-badge.empty { color: rgba(255,255,255,.35); font-weight:400; }
+.btn-del { background:none; border:none; color:rgba(255,255,255,.45); font-size:20px; line-height:1; cursor:pointer; padding:0 0 0 12px; flex-shrink:0; align-self:flex-start; }
+.btn-del:active { color:#e74c3c; }
+
+.card-body { padding:10px 12px 12px; display:grid; grid-template-columns:1fr 1fr; gap:8px; background:#fff !important; }
+.field { display:flex; flex-direction:column; gap:3px; }
+.field label { font-size:8.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:#999; }
+.field label.lbl-auto { color:var(--g-mid); }
+.field label.lbl-est  { color:var(--gold); }
+.field input[type="text"],
+.field input[type="number"] {
+  background: #f5f0e8 !important; border: 1.5px solid #e0d8cc !important;
+  border-radius: 7px; padding: 8px 10px;
+  font-family:'DM Mono',monospace; font-size:13px; font-weight:600;
+  color: #b83232 !important; outline:none; width:100%; height:42px;
+  -moz-appearance:textfield;
+}
+.field input::-webkit-inner-spin-button,
+.field input::-webkit-outer-spin-button { -webkit-appearance:none; }
+.field input:focus { border-color:var(--g-mid) !important; background:#fff !important; }
+.field input::placeholder { color:#ccc; font-weight:300; }
+.field .computed {
+  background: rgba(45,90,61,.07) !important; border: 1.5px solid rgba(45,90,61,.15) !important;
+  border-radius: 7px; padding: 8px 10px;
+  font-family:'DM Mono',monospace; font-size:13px; font-weight:600;
+  color: #2d5a3d !important; text-align:center; height:42px;
+  display:flex; align-items:center; justify-content:center;
+}
+.field .computed.est { background: rgba(196,146,42,.08) !important; border-color: rgba(196,146,42,.25) !important; color: #c4922a !important; font-size:14px; }
+.field .computed.empty { color:#d0ccc5; font-weight:300; }
+.card-divider { margin:0 12px; height:1px; background:var(--cdark); }
+
+.btn-add-wrap { padding: 4px 12px 12px; }
+.btn-add { width:100%; padding:12px; background:transparent; border:1.5px dashed var(--g-light); color:var(--g-mid); font-family:'DM Sans',sans-serif; font-size:13px; font-weight:600; border-radius:10px; cursor:pointer; }
+.btn-add:active { background:rgba(74,140,92,.1); }
+
+/* ── RESUMO ── */
+.resumo-wrap { padding: 12px; }
+.resumo-table { background: #fff; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); overflow: hidden; }
+.resumo-thead { background: var(--g-mid); display: grid; grid-template-columns: 1.1fr 1.4fr 1.2fr 1.3fr; padding: 9px 12px; gap: 4px; }
+.resumo-thead span { font-size: 8px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:var(--cream); text-align:center; }
+.resumo-thead span:first-child { text-align:left; }
+.resumo-thead span:last-child  { color:var(--goldf); }
+.resumo-row { display: grid; grid-template-columns: 1.1fr 1.4fr 1.2fr 1.3fr; padding: 9px 12px; gap: 4px; border-bottom: 1px solid var(--cdark); align-items: center; }
+.resumo-row:last-child { border-bottom: none; }
+.resumo-row:nth-child(even) { background: rgba(74,140,92,.04); }
+.resumo-row span { font-family:'DM Mono',monospace; font-size:11px; font-weight:600; text-align:center; color:#333; }
+.resumo-row span:first-child { text-align:left; color:var(--g-deep); font-size:12px; }
+.resumo-row span:last-child  { color:var(--gold); }
+.resumo-row span.empty { color:#ccc; font-weight:300; }
+.resumo-total { background: var(--g-deep); display: grid; grid-template-columns: 1.1fr 1.4fr 1.2fr 1.3fr; padding: 10px 12px; gap: 4px; align-items:center; }
+.resumo-total span { font-family:'DM Mono',monospace; font-size:11px; font-weight:600; color:var(--g-light); text-align:center; }
+.resumo-total span:first-child { text-align:left; font-size:9px; letter-spacing:.06em; text-transform:uppercase; }
+.resumo-total span:last-child  { color:var(--goldf); font-size:14px; }
+
+/* ── BACKUP ── */
+.backup-wrap { padding: 16px 12px; display:flex; flex-direction:column; gap:12px; }
+.backup-section { background: #fff; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08), 0 0 0 1px var(--border); overflow: hidden; }
+.backup-section-head { background: var(--g-mid); padding: 10px 14px; display: flex; align-items:center; gap:8px; }
+.backup-section-head .bicon { font-size:18px; }
+.backup-section-head .btitle { color:var(--cream); font-size:13px; font-weight:600; }
+.backup-section-head .bsub   { color:var(--g-light); font-size:10px; margin-top:1px; }
+.backup-section-body { padding:14px; display:flex; flex-direction:column; gap:10px; }
+.btn-backup { width:100%; padding:12px 16px; border-radius:9px; cursor:pointer; font-family:'DM Sans',sans-serif; font-size:13px; font-weight:600; border:none; display:flex; align-items:center; justify-content:center; gap:8px; }
+.btn-export { background:var(--g-mid); color:var(--cream); }
+.btn-import { background:var(--cream); color:var(--g-mid); border:1.5px solid var(--g-light) !important; }
+.btn-copy   { background:var(--cdark); color:#444; border:1.5px solid #ddd !important; }
+.backup-note { font-size:11px; color:#aaa; line-height:1.5; text-align:center; }
+.backup-textarea { width:100%; height:100px; border:1.5px solid #e0d8cc; border-radius:8px; padding:10px; font-family:'DM Mono',monospace; font-size:10px; color:#555; background:var(--cream); resize:none; outline:none; }
+.save-stamp { font-size:11px; color:#aaa; font-style:italic; padding:0 2px; text-align:center; }
+
+/* ── TABBAR ── */
+.tabbar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 60; height: var(--tab-h); background: #fff !important; border-top: 1px solid var(--border); display: grid; grid-template-columns: repeat(3, 1fr); padding-bottom: env(safe-area-inset-bottom); }
+.tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; cursor: pointer; padding: 6px 0; color: #aaa; font-size: 10px; font-weight:500; }
+.tab svg { width:22px; height:22px; stroke:currentColor; stroke-width:1.8; fill:none; }
+.tab.active { color: var(--g-mid); }
+.tab.active svg { stroke: var(--g-mid); }
+
+.toast { position:fixed; bottom:70px; left:50%; transform:translateX(-50%); background:var(--g-mid); color:var(--cream); font-size:12px; font-weight:600; padding:8px 20px; border-radius:20px; opacity:0; pointer-events:none; transition:opacity .25s; z-index:100; white-space:nowrap; }
+.toast.show { opacity:1; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span style="font-size:22px">🍇</span>
+  <div><h1>Quality Grapes</h1><p>Calculadora de Produção</p></div>
+</div>
+
+<div class="total-bar" id="totalBar">
+  <span class="lbl">Produção Total</span>
+  <div class="val" id="grandTotal">—<span>Ton</span></div>
+</div>
+
+<div class="sync-bar" id="syncBar">
+  <span class="sync-dot"></span>
+  <span id="syncMsg">Conectando ao banco de dados...</span>
+</div>
+
+<div class="screen active" id="screen-parcelas">
+  <div class="cards" id="cardsList"></div>
+  <div class="btn-add-wrap">
+    <button class="btn-add" onclick="addCard()">＋ Adicionar Parcela</button>
+  </div>
+</div>
+
+<div class="screen" id="screen-resumo">
+  <div class="resumo-wrap">
+    <div class="resumo-table">
+      <div class="resumo-thead">
+        <span>Parcela</span><span>Nº Cachos</span><span>P. Cacho (g)</span><span>Prod. (Ton)</span>
+      </div>
+      <div id="resumoRows"></div>
+      <div class="resumo-total">
+        <span>Total</span><span></span><span></span>
+        <span id="resumoTotalVal">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="screen" id="screen-backup">
+  <div class="backup-wrap">
+    <div class="backup-section">
+      <div class="backup-section-head">
+        <span class="bicon">📤</span>
+        <div><div class="btitle">Exportar</div><div class="bsub">Salvar cópia local dos dados</div></div>
+      </div>
+      <div class="backup-section-body">
+        <button class="btn-backup btn-export" onclick="exportJSON()">⬇️ Baixar backup (.json)</button>
+        <button class="btn-backup btn-copy"   onclick="copyBackup()">📋 Copiar dados</button>
+        <p class="backup-note">Os dados ficam salvos na nuvem em tempo real. O backup é uma cópia extra de segurança.</p>
+      </div>
+    </div>
+    <div class="backup-section">
+      <div class="backup-section-head">
+        <span class="bicon">📥</span>
+        <div><div class="btitle">Importar</div><div class="bsub">Restaurar a partir de backup</div></div>
+      </div>
+      <div class="backup-section-body">
+        <button class="btn-backup btn-import" onclick="document.getElementById('fileInput').click()">📂 Carregar arquivo .json</button>
+        <input type="file" id="fileInput" accept=".json" style="display:none" onchange="importFile(event)">
+        <p class="backup-note">Ou cole o JSON abaixo:</p>
+        <textarea class="backup-textarea" id="pasteArea" placeholder="Cole o JSON aqui..."></textarea>
+        <button class="btn-backup btn-import" onclick="importPaste()">🔄 Restaurar do texto</button>
+      </div>
+    </div>
+    <p class="save-stamp" id="backupStamp">—</p>
+  </div>
+</div>
+
+<div class="tabbar">
+  <div class="tab active" id="tab-parcelas" onclick="switchTab('parcelas')">
+    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+    Parcelas
+  </div>
+  <div class="tab" id="tab-resumo" onclick="switchTab('resumo')">
+    <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+    Resumo
+  </div>
+  <div class="tab" id="tab-backup" onclick="switchTab('backup')">
+    <svg viewBox="0 0 24 24"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+    Backup
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Firebase SDK -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getDatabase, ref, onValue, set, remove } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBMsvoUqRayC_HnhMuaqmJI65-h984QWtg",
+  authDomain: "quality-grapes.firebaseapp.com",
+  databaseURL: "https://quality-grapes-default-rtdb.firebaseio.com",
+  projectId: "quality-grapes",
+  storageBucket: "quality-grapes.firebasestorage.app",
+  messagingSenderId: "509993904356",
+  appId: "1:509993904356:web:7ccd45dac3eac6a52624f1"
+};
+
+const app = initializeApp(firebaseConfig);
+const db  = getDatabase(app);
+const dbRef = ref(db, 'parcelas');
+
+window._fbSet    = (data) => set(dbRef, data);
+window._fbRemove = () => remove(dbRef);
+window._fbReady  = true;
+
+// Listen for real-time changes
+onValue(dbRef, (snapshot) => {
+  const data = snapshot.val();
+  setSyncStatus('ok', '🟢 Sincronizado em tempo real');
+  renderFromDB(data);
+}, (error) => {
+  setSyncStatus('err', '🔴 Erro de conexão: ' + error.message);
+});
+</script>
+
+<script>
+let cardId = 0;
+let ignoreRender = false;
+
+const DEFAULTS = [
+  ['A1',18],['A2',17],['A3',17],['A4',18],
+  ['B1',22],['B2',22],['B3',22],['B4',23],
+  ['L1',17],['L2',17],['L3',17],['L4',17],
+  ['M',16],['P1',24],['P2',25],['P3',26],['P4',27],
+  ['Q1',12],['R1',21],['R2',21],
+  ['V1',17],['V2',17],['V3',17],['V4',18],
+];
+
+const fmt3 = v => v.toLocaleString('pt-BR',{minimumFractionDigits:3,maximumFractionDigits:3});
+const fmt1 = v => v.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1});
+const fmtI = v => Math.round(v).toLocaleString('pt-BR');
+
+function setSyncStatus(type, msg) {
+  const bar = document.getElementById('syncBar');
+  bar.className = 'sync-bar ' + type;
+  document.getElementById('syncMsg').textContent = msg;
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('screen-'+name).classList.add('active');
+  document.getElementById('tab-'+name).classList.add('active');
+  if (name === 'resumo') renderResumo();
+  if (name === 'backup') renderBackupStamp();
+}
+
+function addCard(parcela='', linhas='', contadas='', cachos='', bagas='', peso='', push=false) {
+  const id = ++cardId;
+  const el = document.createElement('div');
+  el.className = 'card'; el.id = `card-${id}`;
+  el.innerHTML = `
+    <div class="card-head">
+      <div class="card-head-left">
+        <input class="parcela-input" type="text" placeholder="Parcela" value="${parcela}" data-id="${id}" data-f="nome">
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+        <span class="prod-badge empty" id="badge_${id}">— Ton</span>
+        <button class="btn-del" onclick="delCard(${id})">×</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="field"><label>Nº de Linhas</label><input type="number" inputmode="numeric" min="0" placeholder="—" value="${linhas}" data-id="${id}" data-f="linhas" oninput="recalcAndPush()"></div>
+      <div class="field"><label>Linhas Contadas</label><input type="number" inputmode="numeric" min="0" placeholder="—" value="${contadas}" data-id="${id}" data-f="contadas" oninput="recalcAndPush()"></div>
+      <div class="field"><label class="lbl-auto">Média Cachos / Linha</label><div class="computed empty" id="media_${id}">—</div></div>
+      <div class="field"><label class="lbl-est">Estimativa Cachos (Parcela)</label><div class="computed est empty" id="est_${id}">—</div></div>
+    </div>
+    <div class="card-divider"></div>
+    <div class="card-body">
+      <div class="field"><label>Nº Cachos Contados</label><input type="number" inputmode="numeric" min="0" placeholder="—" value="${cachos}" data-id="${id}" data-f="cachos" oninput="recalcAndPush()"></div>
+      <div class="field"><label>Média Bagas / Cacho</label><input type="number" inputmode="decimal" min="0" step="0.1" placeholder="—" value="${bagas}" data-id="${id}" data-f="bagas" oninput="recalcAndPush()"></div>
+      <div class="field"><label>Peso da Baga (g)</label><input type="number" inputmode="decimal" min="0" step="0.1" placeholder="—" value="${peso}" data-id="${id}" data-f="peso" oninput="recalcAndPush()"></div>
+      <div class="field"><label class="lbl-auto">Peso Médio Cacho (g)</label><div class="computed empty" id="pcacho_${id}">—</div></div>
+    </div>`;
+  document.getElementById('cardsList').appendChild(el);
+  // push name changes too
+  el.querySelector('.parcela-input').addEventListener('input', recalcAndPush);
+  recalc();
+  if (push) pushToDB();
+}
+
+function delCard(id) {
+  const el = document.getElementById(`card-${id}`);
+  if (el) el.remove();
+  recalc();
+  pushToDB();
+}
+
+function gv(id, f) { const el = document.querySelector(`[data-id="${id}"][data-f="${f}"]`); return el ? parseFloat(el.value) : NaN; }
+function gs(id, f) { const el = document.querySelector(`[data-id="${id}"][data-f="${f}"]`); return el ? (el.value||'') : ''; }
+
+function recalc() {
+  let total = 0, hasAny = false;
+  document.querySelectorAll('.card').forEach(card => {
+    const id = card.id.replace('card-','');
+    const nL=gv(id,'linhas'), nC=gv(id,'contadas'), nCa=gv(id,'cachos'), nB=gv(id,'bagas'), nP=gv(id,'peso');
+    const mediaEl=document.getElementById(`media_${id}`);
+    let media=NaN;
+    if(!isNaN(nCa)&&!isNaN(nC)&&nC>0){media=nCa/nC;mediaEl.textContent=fmt3(media);mediaEl.classList.remove('empty');}
+    else{mediaEl.textContent='—';mediaEl.classList.add('empty');}
+    const estEl=document.getElementById(`est_${id}`);
+    if(!isNaN(media)&&!isNaN(nL)){estEl.textContent=fmtI(nL*media);estEl.classList.remove('empty');}
+    else{estEl.textContent='—';estEl.classList.add('empty');}
+    const pcEl=document.getElementById(`pcacho_${id}`);
+    if(!isNaN(nB)&&!isNaN(nP)){pcEl.textContent=fmt1(nB*nP);pcEl.classList.remove('empty');}
+    else{pcEl.textContent='—';pcEl.classList.add('empty');}
+    const badge=document.getElementById(`badge_${id}`);
+    if(!isNaN(nCa)&&!isNaN(nB)&&!isNaN(nP)){const t=(nCa*nB*nP)/1e6;badge.textContent=fmt3(t)+' Ton';badge.classList.remove('empty');total+=t;hasAny=true;}
+    else{badge.textContent='— Ton';badge.classList.add('empty');}
+  });
+  const gt=document.getElementById('grandTotal');
+  gt.innerHTML=hasAny?`${fmt3(total)}<span> Ton</span>`:`—<span> Ton</span>`;
+}
+
+let pushTimer;
+function recalcAndPush() {
+  recalc();
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(pushToDB, 800);
+}
+
+function getState() {
+  return [...document.querySelectorAll('.card')].map(card => {
+    const id=card.id.replace('card-','');
+    return {nome:gs(id,'nome'),linhas:gs(id,'linhas'),contadas:gs(id,'contadas'),cachos:gs(id,'cachos'),bagas:gs(id,'bagas'),peso:gs(id,'peso')};
+  });
+}
+
+function pushToDB() {
+  if (!window._fbReady) return;
+  const state = getState();
+  window._fbSet(state).then(() => {
+    const now = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    setSyncStatus('ok', `🟢 Salvo em ${now}`);
+  }).catch(e => setSyncStatus('err', '🔴 Erro ao salvar: '+e.message));
+}
+
+function renderFromDB(data) {
+  if (ignoreRender) return;
+  if (!data || !Array.isArray(data)) {
+    // First time — load defaults
+    if (document.querySelectorAll('.card').length === 0) {
+      DEFAULTS.forEach(([p,l]) => addCard(p,l));
+      pushToDB();
+    }
+    return;
+  }
+  // Rebuild cards from DB data
+  ignoreRender = true;
+  document.getElementById('cardsList').innerHTML = '';
+  cardId = 0;
+  data.forEach(r => addCard(r.nome||'', r.linhas||'', r.contadas||'', r.cachos||'', r.bagas||'', r.peso||''));
+  recalc();
+  ignoreRender = false;
+}
+
+function renderResumo() {
+  const rows=getState(); let total=0, hasTotal=false;
+  document.getElementById('resumoRows').innerHTML = rows.map(r=>{
+    const nCa=parseFloat(r.cachos),nB=parseFloat(r.bagas),nP=parseFloat(r.peso);
+    const pc=(!isNaN(nB)&&!isNaN(nP))?fmt1(nB*nP):null;
+    const prod=(!isNaN(nCa)&&!isNaN(nB)&&!isNaN(nP))?(nCa*nB*nP)/1e6:null;
+    if(prod){total+=prod;hasTotal=true;}
+    return `<div class="resumo-row">
+      <span>${r.nome||'—'}</span>
+      <span class="${r.cachos?'':'empty'}">${r.cachos?Number(r.cachos).toLocaleString('pt-BR'):'—'}</span>
+      <span class="${pc?'':'empty'}">${pc||'—'}</span>
+      <span class="${prod!==null?'':'empty'}">${prod!==null?fmt3(prod):'—'}</span>
+    </div>`;
+  }).join('');
+  document.getElementById('resumoTotalVal').textContent=hasTotal?fmt3(total)+' T':'—';
+}
+
+function exportJSON() {
+  const blob=new Blob([JSON.stringify(getState(),null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`qg-backup-${new Date().toISOString().slice(0,10)}.json`; a.click();
+  showToast('📤 Backup exportado!');
+}
+async function copyBackup() {
+  try { await navigator.clipboard.writeText(JSON.stringify(getState())); showToast('📋 Copiado!'); }
+  catch(e) { document.getElementById('pasteArea').value=JSON.stringify(getState()); showToast('Texto gerado abaixo'); }
+}
+function importFile(e) {
+  const f=e.target.files[0]; if(!f) return;
+  new FileReader().onload=ev=>importData(ev.target.result);
+  new FileReader().readAsText(f); e.target.value='';
+  const r=new FileReader(); r.onload=ev=>importData(ev.target.result); r.readAsText(f);
+}
+function importPaste() { importData(document.getElementById('pasteArea').value); }
+function importData(raw) {
+  try {
+    const rows=JSON.parse(raw); if(!Array.isArray(rows)) throw new Error();
+    if(!confirm(`Importar ${rows.length} parcelas? Os dados atuais serão substituídos.`)) return;
+    document.getElementById('cardsList').innerHTML=''; cardId=0;
+    rows.forEach(r=>addCard(r.nome||'',r.linhas||'',r.contadas||'',r.cachos||'',r.bagas||'',r.peso||''));
+    pushToDB(); switchTab('parcelas'); showToast('✅ Dados importados!');
+  } catch(e) { showToast('⚠️ JSON inválido'); }
+}
+function renderBackupStamp() {
+  const now=new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  document.getElementById('backupStamp').textContent=`Dados em nuvem atualizados em tempo real • ${now}`;
+}
+
+let toastT;
+function showToast(msg) {
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2200);
+}
+
+function fixBars() {
+  const h=document.querySelector('.header').getBoundingClientRect().height;
+  const tb=document.querySelector('.total-bar'); tb.style.top=Math.ceil(h)+'px';
+  const sb=document.querySelector('.sync-bar'); sb.style.top=Math.ceil(h+tb.getBoundingClientRect().height)+'px';
+}
+document.fonts.ready.then(fixBars);
+window.addEventListener('resize', fixBars);
+</script>
+</body>
+</html>
