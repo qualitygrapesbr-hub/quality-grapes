@@ -877,6 +877,7 @@ function getState() {
 function pushToDB() {
   if (!window._fbReady) return;
   const state = getState();
+  window._lastPushedState = JSON.stringify(state);
   window._fbSet(state).then(() => {
     const now = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     setSyncStatus('ok', `🟢 Salvo em ${now}`);
@@ -893,6 +894,22 @@ function renderFromDB(data) {
     }
     return;
   }
+
+  // Firebase echoes our own write back through this same listener. Rebuilding the
+  // whole card list on that echo is what was kicking the cursor out of the field
+  // after every single keystroke — skip it entirely when it's just our own data.
+  const incoming = JSON.stringify(data);
+  if (incoming === window._lastPushedState) return;
+
+  // If this really is a change from another device arriving while the user is
+  // mid-typing here, remember what was focused so we can restore it after rebuild.
+  const active = document.activeElement;
+  let focusInfo = null;
+  if (active && active.closest && active.closest('.card')) {
+    const cards = [...document.querySelectorAll('.card')];
+    focusInfo = { idx: cards.indexOf(active.closest('.card')), f: active.dataset.f, start: active.selectionStart, end: active.selectionEnd };
+  }
+
   // Rebuild cards from DB data
   ignoreRender = true;
   document.getElementById('cardsList').innerHTML = '';
@@ -900,6 +917,16 @@ function renderFromDB(data) {
   data.forEach(r => addCard(r.nome||'', r.linhas||'', r.contadas||'', r.cachos||'', r.bagas||'', r.peso||'', r.diametro||'', r.comprimento||'', r.pesobaga||'', r.diaideal||'', r.descCampo||'', r.descPacking||''));
   recalc();
   ignoreRender = false;
+
+  if (focusInfo && focusInfo.idx > -1) {
+    const cards = [...document.querySelectorAll('.card')];
+    const card = cards[focusInfo.idx];
+    const el = card && card.querySelector(`[data-f="${focusInfo.f}"]`);
+    if (el && el.tagName === 'INPUT' && el.type !== 'hidden') {
+      el.focus();
+      if (typeof focusInfo.start === 'number') { try { el.setSelectionRange(focusInfo.start, focusInfo.end); } catch(e) {} }
+    }
+  }
 }
 
 function renderResumo() {
