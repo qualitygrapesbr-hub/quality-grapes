@@ -448,6 +448,10 @@ body { font-family: 'DM Sans', sans-serif; background: #f0ebe2 !important; min-h
           <div id="cntTotal" style="font-family:'DM Mono',monospace;font-size:16px;font-weight:700;color:#e8b84b;">—</div>
         </div>
         <div>
+          <div style="color:#7db88a;font-size:9px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;">Total Contado</div>
+          <div id="cntTotalContado" style="font-family:'DM Mono',monospace;font-size:16px;font-weight:700;color:#e8b84b;">—</div>
+        </div>
+        <div>
           <div style="color:#7db88a;font-size:9px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;">Média Cachos/Linha</div>
           <div id="cntMediaLinha" style="font-family:'DM Mono',monospace;font-size:16px;font-weight:700;color:#e8b84b;">—</div>
         </div>
@@ -1400,6 +1404,9 @@ function cntRecalcSummary() {
   document.getElementById('cntTotal').textContent = totalCachos !== null
     ? Math.round(totalCachos).toLocaleString('pt-BR')
     : '—';
+  // Total Contado — soma real das células já preenchidas até o momento (não é estimativa)
+  const totalContadoEl = document.getElementById('cntTotalContado');
+  if (totalContadoEl) totalContadoEl.textContent = count > 0 ? sum.toLocaleString('pt-BR') : '—';
   // Média cachos/linha = total cachos estimado / total linhas
   const mediaLinhaEl = document.getElementById('cntMediaLinha');
   if (mediaLinhaEl) {
@@ -1605,6 +1612,7 @@ function saveToHistorico() {
 
   const media   = document.getElementById('cntMedia').textContent;
   const total   = document.getElementById('cntTotal').textContent;
+  const totalContado = document.getElementById('cntTotalContado')?.textContent || '—';
   const totalL  = document.getElementById('cntTotalLinhas').textContent;
   const plantas = document.getElementById('cntPlantas').textContent;
 
@@ -1627,6 +1635,7 @@ function saveToHistorico() {
     mediaCachosPorPlanta: media,
     mediaCachosPorLinha: mediaLinhaVal,
     totalCachos: total,
+    totalContado: totalContado,
     plantasZeroCacho: zeroPlantsVal,
     pctZeroCacho: zeroPctVal,
   };
@@ -1712,6 +1721,10 @@ function renderHistorico() {
         <div class="hist-item">
           <span class="hi-label">Total de Cachos Estimado</span>
           <span class="hi-val gold">${r.totalCachos || '—'}</span>
+        </div>
+        <div class="hist-item">
+          <span class="hi-label">Total Contado</span>
+          <span class="hi-val gold">${r.totalContado || '—'}</span>
         </div>
         <div class="hist-item">
           <span class="hi-label">Média Cachos/Linha</span>
