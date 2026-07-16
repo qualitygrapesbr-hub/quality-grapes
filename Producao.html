@@ -1490,8 +1490,22 @@ function loadCntFromDB(data) {
         loaded[parc] = { '1': { rows: v.rows } };
       }
     });
+    // Second migration: that legacy '1' key isn't a selectable cycle anymore
+    // now that named cycles exist (2026.1, 2026.2...). Fold it into 2026.1 so
+    // all the counts entered before the Ciclo field existed become reachable
+    // again from the dropdown.
+    let migratedLegacyCiclo = false;
+    Object.keys(loaded).forEach(parc => {
+      const parcData = loaded[parc];
+      if (parcData && parcData['1'] && !parcData['2026.1']) {
+        parcData['2026.1'] = parcData['1'];
+        delete parcData['1'];
+        migratedLegacyCiclo = true;
+      }
+    });
     cntData = loaded;
     try { localStorage.setItem('qg-contagem', JSON.stringify(cntData)); } catch(e) {}
+    if (migratedLegacyCiclo) pushCnt();
     if (document.getElementById('screen-contagem')?.classList.contains('active')) {
       cntBuildTable();
       cntRecalcSummary();
@@ -1517,8 +1531,31 @@ function loadHistoricoFromDB(data) {
     } catch(e) {}
   }
   window._histLoadedOnce = true;
+
+  // Legacy migration: records saved before named cycles existed have no ciclo
+  // (or default to '1'). Fold those into 2026.1 — same as the Contagem migration —
+  // so they're reachable again from the Ciclo filter.
+  let migratedLegacyHist = false;
+  loaded.forEach(r => {
+    if (!r.ciclo || r.ciclo === '1') { r.ciclo = '2026.1'; migratedLegacyHist = true; }
+  });
+
+  // Dedupe: before "one summary per parcela+ciclo" existed, every save added a new
+  // entry — keep only the most recent per parcela+ciclo (highest id = newest).
+  const beforeCount = loaded.length;
+  loaded.sort((a,b) => (b.id||0) - (a.id||0));
+  const seen = new Set();
+  loaded = loaded.filter(r => {
+    const key = r.parcela + '|' + r.ciclo;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const deduped = loaded.length !== beforeCount;
+
   historicoData = loaded;
   try { localStorage.setItem('qg-historico', JSON.stringify(historicoData)); } catch(e) {}
+  if (migratedLegacyHist || deduped) pushHistorico();
   if (document.getElementById('screen-historico')?.classList.contains('active')) renderHistorico();
 }
 
