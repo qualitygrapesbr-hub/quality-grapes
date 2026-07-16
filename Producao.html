@@ -1366,10 +1366,17 @@ function cntCellChange(input) {
 }
 
 function saveCnt() {
-  pushCnt();
-  saveToHistorico();
-  const now = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-  document.getElementById('cntSaveInfo').textContent = `Salvo ${now}`;
+  const info = document.getElementById('cntSaveInfo');
+  info.textContent = 'Salvando...';
+  Promise.resolve(pushCnt()).then(() => {
+    saveToHistorico();
+    const now = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    info.textContent = `✅ Sincronizado ${now}`;
+  }).catch(() => {
+    saveToHistorico();
+    info.textContent = '⚠️ Salvo só neste aparelho — sem internet! Não feche o app até sincronizar.';
+    showToast('⚠️ Sem internet — não feche o app até sincronizar!');
+  });
 }
 
 function cntRecalcSummary() {
@@ -1417,8 +1424,9 @@ function cntRecalcSummary() {
 }
 
 function pushCnt() {
-  if (window._fbReady) window._fbSetCnt(cntData);
   try { localStorage.setItem('qg-contagem', JSON.stringify(cntData)); } catch(e) {}
+  if (!window._fbReady) return Promise.reject(new Error('offline'));
+  return window._fbSetCnt(cntData);
 }
 
 // Save every local data structure to localStorage right away — cheap, synchronous,
@@ -1472,44 +1480,68 @@ window.addEventListener('beforeunload', flushAllLocal);
 function loadCntFromDB(data) {
   if (window._cntLoaded) return;
   window._cntLoaded = true;
-  
-  let loaded = data;
-  if (!loaded || Object.keys(loaded).length === 0) {
-    try {
-      const local = JSON.parse(localStorage.getItem('qg-contagem') || 'null');
-      if (local) loaded = local;
-    } catch(e) {}
-  }
-  
-  if (loaded && typeof loaded === 'object') {
-    // Migrate old format cntData[parc] = { rows: {...} } (pre-ciclo) to
-    // cntData[parc]['1'] = { rows: {...} }, so existing data isn't orphaned.
-    Object.keys(loaded).forEach(parc => {
-      const v = loaded[parc];
-      if (v && v.rows && typeof v.rows === 'object') {
-        loaded[parc] = { '1': { rows: v.rows } };
-      }
+
+  const migrateFlat = (obj) => {
+    if (!obj) return obj;
+    Object.keys(obj).forEach(parc => {
+      const v = obj[parc];
+      if (v && v.rows && typeof v.rows === 'object') obj[parc] = { '1': { rows: v.rows } };
     });
-    // Second migration: that legacy '1' key isn't a selectable cycle anymore
-    // now that named cycles exist (2026.1, 2026.2...). Fold it into 2026.1 so
-    // all the counts entered before the Ciclo field existed become reachable
-    // again from the dropdown.
-    let migratedLegacyCiclo = false;
-    Object.keys(loaded).forEach(parc => {
-      const parcData = loaded[parc];
-      if (parcData && parcData['1'] && !parcData['2026.1']) {
-        parcData['2026.1'] = parcData['1'];
-        delete parcData['1'];
-        migratedLegacyCiclo = true;
-      }
+    return obj;
+  };
+  const foldLegacyCiclo = (obj) => {
+    if (!obj) return;
+    Object.keys(obj).forEach(parc => {
+      const p = obj[parc];
+      if (p && p['1'] && !p['2026.1']) { p['2026.1'] = p['1']; delete p['1']; }
     });
-    cntData = loaded;
-    try { localStorage.setItem('qg-contagem', JSON.stringify(cntData)); } catch(e) {}
-    if (migratedLegacyCiclo) pushCnt();
-    if (document.getElementById('screen-contagem')?.classList.contains('active')) {
-      cntBuildTable();
-      cntRecalcSummary();
-    }
+  };
+  const countCells = (cicloObj) => {
+    if (!cicloObj || !cicloObj.rows) return 0;
+    let n = 0;
+    Object.values(cicloObj.rows).forEach(rowObj => { n += Object.keys(rowObj||{}).length; });
+    return n;
+  };
+
+  let remote = (data && typeof data === 'object') ? data : {};
+  let local = null;
+  try { local = JSON.parse(localStorage.getItem('qg-contagem') || 'null'); } catch(e) {}
+
+  remote = migrateFlat(remote) || {};
+  local  = migrateFlat(local)  || {};
+  foldLegacyCiclo(remote);
+  foldLegacyCiclo(local);
+
+  // Merge instead of blindly trusting Firebase: for every parcela+ciclo, keep
+  // whichever side (local vs remote) has more filled cells. This is what protects
+  // a count that was typed and "saved" but never actually finished syncing (e.g.
+  // due to a weak signal in the field) from being silently erased by an older
+  // Firebase snapshot the moment the app reloads and reconnects.
+  const merged = {};
+  let localWasRicher = false;
+  const allParcelas = new Set([...Object.keys(remote), ...Object.keys(local)]);
+  allParcelas.forEach(parc => {
+    const rParc = remote[parc] || {};
+    const lParc = local[parc]  || {};
+    merged[parc] = {};
+    const allCiclos = new Set([...Object.keys(rParc), ...Object.keys(lParc)]);
+    allCiclos.forEach(ciclo => {
+      const rCells = countCells(rParc[ciclo]);
+      const lCells = countCells(lParc[ciclo]);
+      if (lCells > rCells) { merged[parc][ciclo] = lParc[ciclo]; localWasRicher = true; }
+      else { merged[parc][ciclo] = rParc[ciclo] || lParc[ciclo]; }
+    });
+  });
+
+  cntData = merged;
+  try { localStorage.setItem('qg-contagem', JSON.stringify(cntData)); } catch(e) {}
+  // If local data turned out to have more than what was on the server, push it
+  // back up right away so the recovery actually gets synced.
+  if (localWasRicher) pushCnt();
+
+  if (document.getElementById('screen-contagem')?.classList.contains('active')) {
+    cntBuildTable();
+    cntRecalcSummary();
   }
 }
 
