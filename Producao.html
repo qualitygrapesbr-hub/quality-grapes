@@ -770,6 +770,10 @@ function recalc() {
   document.querySelectorAll('.card').forEach(card => {
     const id = card.id.replace('card-','');
     const nL=gv(id,'linhas'), nC=gv(id,'contadas'), nCa=gv(id,'cachos'), nB=gv(id,'bagas'), nP=gv(id,'peso');
+    const nDescCampo   = gv(id,'descCampo');
+    const nDescPacking = gv(id,'descPacking');
+    const descCampoTon   = isNaN(nDescCampo)   ? 0 : nDescCampo/1000;
+    const descPackingTon = isNaN(nDescPacking) ? 0 : nDescPacking/1000;
     const mediaEl=document.getElementById(`media_${id}`);
     let media=NaN;
     if(!isNaN(nCa)&&!isNaN(nC)&&nC>0){media=nCa/nC;mediaEl.textContent=fmt3(media);mediaEl.classList.remove('empty');}
@@ -781,7 +785,12 @@ function recalc() {
     if(!isNaN(nB)&&!isNaN(nP)){pcEl.textContent=fmt1(nB*nP);pcEl.classList.remove('empty');}
     else{pcEl.textContent='—';pcEl.classList.add('empty');}
     const badge=document.getElementById(`badge_${id}`);
-    if(!isNaN(nCa)&&!isNaN(nB)&&!isNaN(nP)){const t=(nCa*nB*nP)/1e6;badge.textContent=fmt3(t)+' Ton';badge.classList.remove('empty');total+=t;hasAny=true;}
+    // Badge shows the Volume Ton líquida (net) per parcela — bruto menos descarte de Campo e Packing, ambos convertidos de kg para Ton
+    if(!isNaN(nCa)&&!isNaN(nB)&&!isNaN(nP)){
+      const t=(nCa*nB*nP)/1e6;
+      const netT = t - descCampoTon - descPackingTon;
+      badge.textContent=fmt3(netT)+' Ton';badge.classList.remove('empty');total+=t;hasAny=true;
+    }
     else{badge.textContent='— Ton';badge.classList.add('empty');}
     // Comprimento x Diâmetro = comprimento / diâmetro
     const nDiam=gv(id,'diametro'), nComp=gv(id,'comprimento');
@@ -819,8 +828,6 @@ function recalc() {
       else{pmEl.textContent='—';pmEl.classList.add('empty');}
     }
     // Descarte Campo e Packing — % sobre produção estimada (em kg)
-    const nDescCampo   = gv(id,'descCampo');
-    const nDescPacking = gv(id,'descPacking');
     // Produção em kg (badge já calcula em Ton × 1000)
     const nCaD=gv(id,'cachos'), nBD=gv(id,'bagas'), nPD=gv(id,'peso');
     const prodKg = (!isNaN(nCaD)&&!isNaN(nBD)&&!isNaN(nPD)) ? (nCaD*nBD*nPD)/1000 : NaN;
@@ -1512,6 +1519,9 @@ function saveToHistorico() {
     pctZeroCacho: zeroPctVal,
   };
 
+  // One summary per parcela+ciclo: replace the existing record for this combination
+  // instead of piling up a new entry every time "Salvar Contagem" is clicked.
+  historicoData = historicoData.filter(r => !(r.parcela === parc && String(r.ciclo) === String(ciclo)));
   historicoData.unshift(record); // newest first
   pushHistorico();
   updateHistFiltro();
