@@ -639,8 +639,7 @@ window._fbSetHist = (data) => set(dbHistRef, data);
 onValue(dbHistRef, (snapshot) => {
   window._histDB = snapshot.val() || [];
   if (!Array.isArray(window._histDB)) window._histDB = Object.values(window._histDB);
-  historicoData = window._histDB;
-  if (document.getElementById('screen-historico')?.classList.contains('active')) renderHistorico();
+  loadHistoricoFromDB(window._histDB);
 });
 window._fbSetCnt = (data) => set(dbCntRef, data);
 onValue(dbCntRef, (snapshot) => {
@@ -1505,6 +1504,23 @@ function loadCntFromDB(data) {
 // HISTÓRICO
 // ════════════════════════════
 let historicoData = [];
+
+// Called from the Firebase listener (module script) — a bare assignment from there
+// to a `let` declared here would silently throw (different script scopes), which is
+// why Histórico was never actually loading saved records after a page reload.
+function loadHistoricoFromDB(data) {
+  let loaded = Array.isArray(data) ? data : [];
+  if (loaded.length === 0 && !window._histLoadedOnce) {
+    try {
+      const local = JSON.parse(localStorage.getItem('qg-historico') || 'null');
+      if (Array.isArray(local) && local.length > 0) loaded = local;
+    } catch(e) {}
+  }
+  window._histLoadedOnce = true;
+  historicoData = loaded;
+  try { localStorage.setItem('qg-historico', JSON.stringify(historicoData)); } catch(e) {}
+  if (document.getElementById('screen-historico')?.classList.contains('active')) renderHistorico();
+}
 
 function pushHistorico() {
   if (window._fbReady) window._fbSetHist(historicoData);
