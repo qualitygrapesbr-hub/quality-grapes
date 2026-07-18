@@ -80,6 +80,7 @@ body { font-family: 'DM Sans', sans-serif; background: #f0ebe2 !important; min-h
 .sync-bar.ok   { background: #e8f5e9; border-color: #a5d6a7; color: #2d5a3d; }
 .sync-bar.err  { background: #fdecea; border-color: #f5c6cb; color: #842029; }
 .sync-dot { width:7px; height:7px; border-radius:50%; background:currentColor; flex-shrink:0; }
+#syncUserBar { position: sticky; z-index: 46; }
 
 .screen { display: none; padding-bottom: calc(var(--tab-h) + 20px); }
 .screen.active { display: block; }
@@ -344,7 +345,9 @@ body { font-family: 'DM Sans', sans-serif; background: #f0ebe2 !important; min-h
 <div class="sync-bar" id="syncBar">
   <span class="sync-dot"></span>
   <span id="syncMsg">Conectando ao banco de dados...</span>
-  <span id="syncUserMsg" style="margin-left:6px;opacity:.85;"></span>
+</div>
+<div id="syncUserBar" style="padding:6px 14px;background:#fff;border-bottom:1px solid #e8e2d5;font-size:12px;color:#555;font-family:'DM Sans',sans-serif;">
+  <span id="syncUserMsg">Nenhuma sincronização registrada ainda</span>
 </div>
 
 <div class="screen active" id="screen-parcelas">
@@ -738,9 +741,9 @@ function markUserSync() {
 function renderLastSync(meta) {
   const el = document.getElementById('syncUserMsg');
   if (!el) return;
-  if (!meta || !meta.ts) { el.textContent = ''; return; }
-  const dt = new Date(meta.ts).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-  el.textContent = `· último lançamento: ${meta.nome} em ${dt}`;
+  if (!meta || !meta.ts) { el.textContent = 'Nenhuma sincronização registrada ainda'; return; }
+  const dt = new Date(meta.ts).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  el.innerHTML = `Última sincronização: <b>${meta.nome}</b> — ${dt}`;
 }
 
 function switchTab(name) {
@@ -1049,6 +1052,7 @@ function fixBars() {
   const h=document.querySelector('.header').getBoundingClientRect().height;
   const tb=document.querySelector('.total-bar'); tb.style.top=Math.ceil(h)+'px';
   const sb=document.querySelector('.sync-bar'); sb.style.top=Math.ceil(h+tb.getBoundingClientRect().height)+'px';
+  const ub=document.getElementById('syncUserBar'); if (ub) ub.style.top=Math.ceil(h+tb.getBoundingClientRect().height+sb.getBoundingClientRect().height)+'px';
 }
 document.fonts.ready.then(fixBars);
 window.addEventListener('resize', fixBars);
