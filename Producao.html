@@ -1239,6 +1239,14 @@ function getCiclo() {
   return (document.getElementById('cntCiclo')?.value || '').trim();
 }
 
+// Firebase Realtime Database keys cannot contain '.', '$', '#', '[', ']', or '/'.
+// Ciclo names look like "2026.1" — fine as a stored VALUE (e.g. in ciclosData or
+// historico), but cntData uses ciclo as an object KEY, so it must be sanitized
+// here first or Firebase silently rejects the entire write.
+function cicloKey(ciclo) {
+  return String(ciclo).replace(/[.$#\[\]\/]/g, '_');
+}
+
 // ════════════════════════════
 // CICLOS (ex: 2026.1, 2026.2, 2026.3)
 // Managed in the Dados tab, shared as dropdowns across Parcelas, Contagem e Histórico
@@ -1367,7 +1375,8 @@ function cntBuildTable() {
 
   // Build saved data map (keyed by parcela + ciclo, so recounting a parcela in a new ciclo doesn't overwrite the old one)
   const ciclo = getCiclo();
-  const saved = (cntData[parc] && cntData[parc][ciclo] && cntData[parc][ciclo].rows) ? cntData[parc][ciclo].rows : {};
+  const ck = cicloKey(ciclo);
+  const saved = (cntData[parc] && cntData[parc][ck] && cntData[parc][ck].rows) ? cntData[parc][ck].rows : {};
 
   // Build table
   let html = '<table class="cnt-table"><thead><tr><th>Planta</th>';
@@ -1402,13 +1411,14 @@ function cntBuildTable() {
 function cntCellChange(input) {
   const parc = document.getElementById('cntParcela').value;
   const ciclo = getCiclo();
+  const ck = cicloKey(ciclo);
   const p = input.dataset.p;
   const l = input.dataset.l;
   const val = input.value;
   if (!cntData[parc]) cntData[parc] = {};
-  if (!cntData[parc][ciclo]) cntData[parc][ciclo] = { rows: {} };
-  if (!cntData[parc][ciclo].rows[p]) cntData[parc][ciclo].rows[p] = {};
-  cntData[parc][ciclo].rows[p][l] = val;
+  if (!cntData[parc][ck]) cntData[parc][ck] = { rows: {} };
+  if (!cntData[parc][ck].rows[p]) cntData[parc][ck].rows[p] = {};
+  cntData[parc][ck].rows[p][l] = val;
 
   // Update column total
   const nPlantas = document.querySelectorAll('.cnt-cell[data-l="' + l + '"]').length;
@@ -1440,10 +1450,10 @@ function saveCnt() {
     markUserSync();
     const now = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     info.textContent = `✅ Sincronizado ${now}`;
-  }).catch(() => {
+  }).catch((e) => {
     saveToHistorico();
-    info.textContent = '⚠️ Salvo só neste aparelho — sem internet! Não feche o app até sincronizar.';
-    showToast('⚠️ Sem internet — não feche o app até sincronizar!');
+    info.textContent = '⚠️ Salvo só neste aparelho — não sincronizou! Não feche o app até sincronizar.';
+    showToast('⚠️ Não sincronizou (' + (e?.message || 'erro') + ') — não feche o app!');
   });
 }
 
@@ -1498,7 +1508,11 @@ function pushCnt() {
   try { localStorage.setItem('qg-contagem', JSON.stringify(cntData)); } catch(e) {}
   window._lastPushedCnt = JSON.stringify(cntData);
   if (!window._fbReady) return Promise.reject(new Error('offline'));
-  return window._fbSetCnt(cntData);
+  try {
+    return Promise.resolve(window._fbSetCnt(cntData));
+  } catch (e) {
+    return Promise.reject(e);
+  }
 }
 
 // Save every local data structure to localStorage right away — cheap, synchronous,
@@ -1523,11 +1537,12 @@ function forceSync() {
   clearTimeout(pushTimer);
   clearTimeout(window._dadosPushTimer);
   clearTimeout(window._cntPushTimer);
+  const safeCall = (fn) => { try { return Promise.resolve(fn()); } catch (e) { return Promise.reject(e); } };
   const tasks = [
-    window._fbSet(getState()),
-    window._fbSetDados(getDadosState()),
-    window._fbSetCnt(cntData),
-    window._fbSetHist(historicoData),
+    safeCall(() => window._fbSet(getState())),
+    safeCall(() => window._fbSetDados(getDadosState())),
+    safeCall(() => window._fbSetCnt(cntData)),
+    safeCall(() => window._fbSetHist(historicoData)),
   ];
   Promise.all(tasks).then(() => {
     markUserSync();
@@ -1563,7 +1578,7 @@ function loadCntFromDB(data) {
     if (!obj) return;
     Object.keys(obj).forEach(parc => {
       const p = obj[parc];
-      if (p && p['1'] && !p['2026.1']) { p['2026.1'] = p['1']; delete p['1']; }
+      if (p && p['1'] && !p[cicloKey('2026.1')]) { p[cicloKey('2026.1')] = p['1']; delete p['1']; }
     });
   };
   const countCells = (cicloObj) => {
@@ -1572,10 +1587,28 @@ function loadCntFromDB(data) {
     Object.values(cicloObj.rows).forEach(rowObj => { n += Object.keys(rowObj||{}).length; });
     return n;
   };
+  // Any ciclo key created before this fix existed (e.g. a raw "2026.1") is invalid
+  // for Firebase and would have silently failed to sync — rename every such key to
+  // its sanitized form here, merging with an existing sanitized entry if needed.
+  const sanitizeCicloKeys = (obj) => {
+    if (!obj) return obj;
+    Object.keys(obj).forEach(parc => {
+      const p = obj[parc];
+      if (!p) return;
+      Object.keys(p).forEach(k => {
+        const sk = cicloKey(k);
+        if (sk === k) return;
+        if (!p[sk] || countCells(p[k]) > countCells(p[sk])) p[sk] = p[k];
+        delete p[k];
+      });
+    });
+    return obj;
+  };
 
   let remote = (data && typeof data === 'object') ? data : {};
   remote = migrateFlat(remote) || {};
   foldLegacyCiclo(remote);
+  sanitizeCicloKeys(remote);
 
   // Firebase echoes our own writes back through this same listener — ignore that,
   // or every keystroke's eventual sync would rebuild the table and kick the
@@ -1591,7 +1624,7 @@ function loadCntFromDB(data) {
   if (!window._cntLoaded) {
     try {
       const ls = JSON.parse(localStorage.getItem('qg-contagem') || 'null');
-      if (ls) { local = migrateFlat(ls) || {}; foldLegacyCiclo(local); }
+      if (ls) { local = migrateFlat(ls) || {}; foldLegacyCiclo(local); sanitizeCicloKeys(local); }
     } catch(e) {}
   }
   window._cntLoaded = true;
