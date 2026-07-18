@@ -626,6 +626,7 @@ window._fbSetDados = (data) => set(dbDadosRef, data);
 onValue(dbDadosRef, (snapshot) => {
   window._dadosDB = snapshot.val() || [];
   renderDadosFromDB(window._dadosDB);
+  markSynced();
 });
 
 const dbCntRef = ref(db, 'contagem');
@@ -636,6 +637,7 @@ onValue(dbCiclosRef, (snapshot) => {
   window._ciclosDB = snapshot.val() || [];
   if (!Array.isArray(window._ciclosDB)) window._ciclosDB = Object.values(window._ciclosDB);
   loadCiclosFromDB(window._ciclosDB);
+  markSynced();
 });
 
 const dbHistRef = ref(db, 'historico');
@@ -644,18 +646,20 @@ onValue(dbHistRef, (snapshot) => {
   window._histDB = snapshot.val() || [];
   if (!Array.isArray(window._histDB)) window._histDB = Object.values(window._histDB);
   loadHistoricoFromDB(window._histDB);
+  markSynced();
 });
 window._fbSetCnt = (data) => set(dbCntRef, data);
 onValue(dbCntRef, (snapshot) => {
   window._cntDB = snapshot.val() || {};
   loadCntFromDB(window._cntDB);
+  markSynced();
 });
 
 // Listen for real-time changes
 onValue(dbRef, (snapshot) => {
   const data = snapshot.val();
-  setSyncStatus('ok', '🟢 Sincronizado em tempo real');
   renderFromDB(data);
+  markSynced();
 }, (error) => {
   setSyncStatus('err', '🔴 Erro de conexão: ' + error.message);
 });
@@ -682,6 +686,14 @@ function setSyncStatus(type, msg) {
   const bar = document.getElementById('syncBar');
   bar.className = 'sync-bar ' + type;
   document.getElementById('syncMsg').textContent = msg;
+}
+
+// Called by every Firebase listener (Parcelas, Dados, Contagem, Histórico, Ciclos)
+// whenever data comes in — stamps the status bar with exactly when the last
+// successful sync happened, so "sincronizado" never has to be taken on faith.
+function markSynced() {
+  const now = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  setSyncStatus('ok', `🟢 Sincronizado — ${now}`);
 }
 
 function switchTab(name) {
@@ -1208,6 +1220,7 @@ function delCiclo(c) {
 }
 
 function pushCiclos() {
+  window._lastPushedCiclos = JSON.stringify(ciclosData.slice().sort());
   if (window._fbReady) window._fbSetCiclos(ciclosData);
   try { localStorage.setItem('qg-ciclos', JSON.stringify(ciclosData)); } catch(e) {}
 }
@@ -1237,16 +1250,18 @@ function refreshCicloSelects() {
 }
 
 function loadCiclosFromDB(data) {
-  if (window._ciclosLoaded) return;
-  window._ciclosLoaded = true;
+  let loaded = Array.isArray(data) ? data : [];
+  const incoming = JSON.stringify(loaded.slice().sort());
+  // Skip our own echo — same reasoning as Contagem/Parcelas above.
+  if (window._ciclosLoaded && incoming === window._lastPushedCiclos) return;
 
-  let loaded = data;
-  if (!Array.isArray(loaded) || loaded.length === 0) {
+  if (loaded.length === 0 && !window._ciclosLoaded) {
     try {
       const local = JSON.parse(localStorage.getItem('qg-ciclos') || 'null');
       if (Array.isArray(local) && local.length > 0) loaded = local;
     } catch(e) {}
   }
+  window._ciclosLoaded = true;
 
   ciclosData = Array.isArray(loaded) ? loaded.slice().sort() : [];
   try { localStorage.setItem('qg-ciclos', JSON.stringify(ciclosData)); } catch(e) {}
@@ -1432,6 +1447,7 @@ function cntRecalcSummary() {
 
 function pushCnt() {
   try { localStorage.setItem('qg-contagem', JSON.stringify(cntData)); } catch(e) {}
+  window._lastPushedCnt = JSON.stringify(cntData);
   if (!window._fbReady) return Promise.reject(new Error('offline'));
   return window._fbSetCnt(cntData);
 }
@@ -1485,9 +1501,6 @@ window.addEventListener('pagehide', flushAllLocal);
 window.addEventListener('beforeunload', flushAllLocal);
 
 function loadCntFromDB(data) {
-  if (window._cntLoaded) return;
-  window._cntLoaded = true;
-
   const migrateFlat = (obj) => {
     if (!obj) return obj;
     Object.keys(obj).forEach(parc => {
@@ -1511,13 +1524,27 @@ function loadCntFromDB(data) {
   };
 
   let remote = (data && typeof data === 'object') ? data : {};
-  let local = null;
-  try { local = JSON.parse(localStorage.getItem('qg-contagem') || 'null'); } catch(e) {}
-
   remote = migrateFlat(remote) || {};
-  local  = migrateFlat(local)  || {};
   foldLegacyCiclo(remote);
-  foldLegacyCiclo(local);
+
+  // Firebase echoes our own writes back through this same listener — ignore that,
+  // or every keystroke's eventual sync would rebuild the table and kick the
+  // cursor out mid-typing (the same bug fixed earlier in Parcelas).
+  const incoming = JSON.stringify(remote);
+  if (window._cntLoaded && incoming === window._lastPushedCnt) return;
+
+  // On the very first load, compare against the localStorage backup too (covers
+  // a device that closed before an earlier save finished syncing). After that,
+  // compare against whatever is already in memory — which is what makes a
+  // genuine update from another device actually show up here live.
+  let local = cntData;
+  if (!window._cntLoaded) {
+    try {
+      const ls = JSON.parse(localStorage.getItem('qg-contagem') || 'null');
+      if (ls) { local = migrateFlat(ls) || {}; foldLegacyCiclo(local); }
+    } catch(e) {}
+  }
+  window._cntLoaded = true;
 
   // Merge instead of blindly trusting Firebase: for every parcela+ciclo, keep
   // whichever side (local vs remote) has more filled cells. This is what protects
@@ -1526,10 +1553,10 @@ function loadCntFromDB(data) {
   // Firebase snapshot the moment the app reloads and reconnects.
   const merged = {};
   let localWasRicher = false;
-  const allParcelas = new Set([...Object.keys(remote), ...Object.keys(local)]);
+  const allParcelas = new Set([...Object.keys(remote), ...Object.keys(local||{})]);
   allParcelas.forEach(parc => {
     const rParc = remote[parc] || {};
-    const lParc = local[parc]  || {};
+    const lParc = (local && local[parc]) || {};
     merged[parc] = {};
     const allCiclos = new Set([...Object.keys(rParc), ...Object.keys(lParc)]);
     allCiclos.forEach(ciclo => {
@@ -1546,9 +1573,21 @@ function loadCntFromDB(data) {
   // back up right away so the recovery actually gets synced.
   if (localWasRicher) pushCnt();
 
+  // Live-refresh the visible grid so a count entered on another device actually
+  // shows up here without needing a reload — preserving focus/cursor in case
+  // this device is mid-typing in a different cell when the update arrives.
   if (document.getElementById('screen-contagem')?.classList.contains('active')) {
+    const active = document.activeElement;
+    let focusInfo = null;
+    if (active && active.classList && active.classList.contains('cnt-cell')) {
+      focusInfo = { p: active.dataset.p, l: active.dataset.l, start: active.selectionStart, end: active.selectionEnd };
+    }
     cntBuildTable();
     cntRecalcSummary();
+    if (focusInfo) {
+      const el = document.querySelector(`.cnt-cell[data-p="${focusInfo.p}"][data-l="${focusInfo.l}"]`);
+      if (el) { el.focus(); try { el.setSelectionRange(focusInfo.start, focusInfo.end); } catch(e) {} }
+    }
   }
 }
 
