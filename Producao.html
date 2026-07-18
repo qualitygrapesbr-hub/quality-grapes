@@ -344,6 +344,7 @@ body { font-family: 'DM Sans', sans-serif; background: #f0ebe2 !important; min-h
 <div class="sync-bar" id="syncBar">
   <span class="sync-dot"></span>
   <span id="syncMsg">Conectando ao banco de dados...</span>
+  <span id="syncUserMsg" style="margin-left:6px;opacity:.85;"></span>
 </div>
 
 <div class="screen active" id="screen-parcelas">
@@ -511,6 +512,17 @@ body { font-family: 'DM Sans', sans-serif; background: #f0ebe2 !important; min-h
   <div class="backup-wrap">
     <div class="backup-section">
       <div class="backup-section-head">
+        <span class="bicon">👤</span>
+        <div><div class="btitle">Usuário</div><div class="bsub">Quem está lançando dados neste aparelho hoje</div></div>
+      </div>
+      <div class="backup-section-body">
+        <input type="text" id="usuarioInput" placeholder="Seu nome (ex: Maria)" style="width:100%;box-sizing:border-box;padding:11px 12px;border:1.5px solid #e0d8cc;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:14px;margin-bottom:8px;">
+        <button class="btn-backup btn-import" onclick="salvarUsuario()">💾 Salvar Nome</button>
+        <p class="backup-note">Esse nome aparece pra todo mundo junto com a hora da última sincronização — é temporário e pode trocar quando quiser (ex: outra pessoa usando o aparelho amanhã).</p>
+      </div>
+    </div>
+    <div class="backup-section">
+      <div class="backup-section-head">
         <span class="bicon">📤</span>
         <div><div class="btitle">Exportar</div><div class="bsub">Salvar cópia local dos dados</div></div>
       </div>
@@ -648,6 +660,12 @@ onValue(dbHistRef, (snapshot) => {
   loadHistoricoFromDB(window._histDB);
   markSynced();
 });
+const dbMetaRef = ref(db, 'meta/lastSync');
+window._fbSetMeta = (data) => set(dbMetaRef, data);
+onValue(dbMetaRef, (snapshot) => {
+  renderLastSync(snapshot.val());
+});
+
 window._fbSetCnt = (data) => set(dbCntRef, data);
 onValue(dbCntRef, (snapshot) => {
   window._cntDB = snapshot.val() || {};
@@ -694,6 +712,35 @@ function setSyncStatus(type, msg) {
 function markSynced() {
   const now = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
   setSyncStatus('ok', `🟢 Sincronizado — ${now}`);
+}
+
+// ════════════════════════════
+// USUÁRIO — nome temporário de quem está usando este aparelho hoje
+// ════════════════════════════
+function getUsuario() {
+  try { return (localStorage.getItem('qg-usuario') || '').trim(); } catch(e) { return ''; }
+}
+
+function salvarUsuario() {
+  const v = (document.getElementById('usuarioInput').value || '').trim();
+  try { localStorage.setItem('qg-usuario', v); } catch(e) {}
+  showToast(v ? `✅ Nome salvo: ${v}` : '✅ Nome removido');
+}
+
+// Records who made the last save/sync and when, written to Firebase so every
+// device shows the same info — not just the one that made the change.
+function markUserSync() {
+  if (!window._fbReady) return;
+  const rec = { nome: getUsuario() || 'Sem nome', ts: Date.now() };
+  window._fbSetMeta(rec);
+}
+
+function renderLastSync(meta) {
+  const el = document.getElementById('syncUserMsg');
+  if (!el) return;
+  if (!meta || !meta.ts) { el.textContent = ''; return; }
+  const dt = new Date(meta.ts).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  el.textContent = `· último lançamento: ${meta.nome} em ${dt}`;
 }
 
 function switchTab(name) {
@@ -1094,6 +1141,7 @@ function saveDados() {
   try { localStorage.setItem('qg-dados', JSON.stringify(state)); } catch(e) {}
   // Sync to Parcelas tab
   syncDadosToParcelas(state);
+  markUserSync();
   const now = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
   document.getElementById('dadosSaveInfo').textContent = `✅ Salvo em ${now}`;
   showToast('✅ Dados e Parcelas sincronizados!');
@@ -1389,6 +1437,7 @@ function saveCnt() {
   info.textContent = 'Salvando...';
   Promise.resolve(pushCnt()).then(() => {
     saveToHistorico();
+    markUserSync();
     const now = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     info.textContent = `✅ Sincronizado ${now}`;
   }).catch(() => {
@@ -1481,6 +1530,7 @@ function forceSync() {
     window._fbSetHist(historicoData),
   ];
   Promise.all(tasks).then(() => {
+    markUserSync();
     const now = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     setSyncStatus('ok', `🟢 Sincronizado em ${now}`);
     document.getElementById('cntSaveInfo').textContent = `Sincronizado ${now}`;
@@ -1876,6 +1926,9 @@ document.addEventListener('visibilitychange', () => {
 
 // Init contagem select after load
 setTimeout(cntUpdateSelect, 1500);
+
+// Populate the "Usuário" field in Backup with whatever name was saved on this device
+(() => { const inp = document.getElementById('usuarioInput'); if (inp) inp.value = getUsuario(); })();
 </script>
 </body>
 </html>
