@@ -678,10 +678,17 @@ window._fbSetCell = (parc, ck, p, l, val) => {
   const cellRef = ref(db, `contagem/${parc}/${ck}/rows/${p}/${l}`);
   return (val === '' || val === null || val === undefined) ? remove(cellRef) : set(cellRef, val);
 };
+let cntSnapshotTimer = null;
 onValue(dbCntRef, (snapshot) => {
   window._cntDB = snapshot.val() || {};
-  loadCntFromDB(window._cntDB);
-  markSynced();
+  // Debounced: per-cell writes mean this fires very often while people are
+  // actively counting — coalesce bursts into one processing pass instead of
+  // re-running the (heavier) merge logic on every single cell change.
+  clearTimeout(cntSnapshotTimer);
+  cntSnapshotTimer = setTimeout(() => {
+    loadCntFromDB(window._cntDB);
+    markSynced();
+  }, 400);
 });
 
 // Listen for real-time changes
@@ -1643,50 +1650,94 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', flushAllLocal);
 window.addEventListener('beforeunload', flushAllLocal);
 
-function loadCntFromDB(data) {
-  const migrateFlat = (obj) => {
-    if (!obj) return obj;
-    Object.keys(obj).forEach(parc => {
-      const v = obj[parc];
-      if (v && v.rows && typeof v.rows === 'object') obj[parc] = { '1': { rows: v.rows } };
+const migrateFlat = (obj) => {
+  if (!obj) return obj;
+  Object.keys(obj).forEach(parc => {
+    const v = obj[parc];
+    if (v && v.rows && typeof v.rows === 'object') obj[parc] = { '1': { rows: v.rows } };
+  });
+  return obj;
+};
+const foldLegacyCiclo = (obj) => {
+  if (!obj) return;
+  Object.keys(obj).forEach(parc => {
+    const p = obj[parc];
+    if (p && p['1'] && !p[cicloKey('2026.1')]) { p[cicloKey('2026.1')] = p['1']; delete p['1']; }
+  });
+};
+const countCells = (cicloObj) => {
+  if (!cicloObj || !cicloObj.rows) return 0;
+  let n = 0;
+  Object.values(cicloObj.rows).forEach(rowObj => { n += Object.keys(rowObj||{}).length; });
+  return n;
+};
+// Any ciclo key created before this fix existed (e.g. a raw "2026.1") is invalid
+// for Firebase and would have silently failed to sync — rename every such key to
+// its sanitized form here, merging with an existing sanitized entry if needed.
+const sanitizeCicloKeys = (obj) => {
+  if (!obj) return obj;
+  Object.keys(obj).forEach(parc => {
+    const p = obj[parc];
+    if (!p) return;
+    Object.keys(p).forEach(k => {
+      const sk = cicloKey(k);
+      if (sk === k) return;
+      if (!p[sk] || countCells(p[k]) > countCells(p[sk])) p[sk] = p[k];
+      delete p[k];
     });
-    return obj;
-  };
-  const foldLegacyCiclo = (obj) => {
-    if (!obj) return;
-    Object.keys(obj).forEach(parc => {
-      const p = obj[parc];
-      if (p && p['1'] && !p[cicloKey('2026.1')]) { p[cicloKey('2026.1')] = p['1']; delete p['1']; }
-    });
-  };
-  const countCells = (cicloObj) => {
-    if (!cicloObj || !cicloObj.rows) return 0;
-    let n = 0;
-    Object.values(cicloObj.rows).forEach(rowObj => { n += Object.keys(rowObj||{}).length; });
-    return n;
-  };
-  // Any ciclo key created before this fix existed (e.g. a raw "2026.1") is invalid
-  // for Firebase and would have silently failed to sync — rename every such key to
-  // its sanitized form here, merging with an existing sanitized entry if needed.
-  const sanitizeCicloKeys = (obj) => {
-    if (!obj) return obj;
-    Object.keys(obj).forEach(parc => {
-      const p = obj[parc];
-      if (!p) return;
-      Object.keys(p).forEach(k => {
-        const sk = cicloKey(k);
-        if (sk === k) return;
-        if (!p[sk] || countCells(p[k]) > countCells(p[sk])) p[sk] = p[k];
-        delete p[k];
-      });
-    });
-    return obj;
-  };
+  });
+  return obj;
+};
 
+function loadCntFromDB(data) {
   let remote = (data && typeof data === 'object') ? data : {};
-  remote = migrateFlat(remote) || {};
-  foldLegacyCiclo(remote);
-  sanitizeCicloKeys(remote);
+
+  // The migration/sanitize/merge pass below is relatively expensive (walks every
+  // parcela+ciclo+cell). It only ever needs to run ONCE per session — after that,
+  // the server already holds the accumulated union of every device's cells (since
+  // each cell is written to its own path), so we can just trust it directly instead
+  // of recomputing a full merge on every single update. Doing the full pass on
+  // every cell-write notification (which fire often during active counting) is
+  // what was making the app hang.
+  if (!window._cntMigrated) {
+    window._cntMigrated = true;
+    remote = migrateFlat(remote) || {};
+    foldLegacyCiclo(remote);
+    sanitizeCicloKeys(remote);
+
+    let local = null;
+    try {
+      const ls = JSON.parse(localStorage.getItem('qg-contagem') || 'null');
+      if (ls) { local = migrateFlat(ls) || {}; foldLegacyCiclo(local); sanitizeCicloKeys(local); }
+    } catch(e) {}
+
+    if (local) {
+      const merged = {};
+      let localHadExtra = false;
+      const allParcelas = new Set([...Object.keys(remote), ...Object.keys(local)]);
+      allParcelas.forEach(parc => {
+        const rParc = remote[parc] || {};
+        const lParc = local[parc] || {};
+        merged[parc] = {};
+        const allCiclos = new Set([...Object.keys(rParc), ...Object.keys(lParc)]);
+        allCiclos.forEach(ciclo => {
+          const rRows = (rParc[ciclo] && rParc[ciclo].rows) || {};
+          const lRows = (lParc[ciclo] && lParc[ciclo].rows) || {};
+          const rows = {};
+          const allP = new Set([...Object.keys(rRows), ...Object.keys(lRows)]);
+          allP.forEach(p => {
+            const rRow = rRows[p] || {};
+            const lRow = lRows[p] || {};
+            rows[p] = { ...lRow, ...rRow };
+            Object.keys(lRow).forEach(l => { if (rRow[l] === undefined) localHadExtra = true; });
+          });
+          merged[parc][ciclo] = { rows };
+        });
+      });
+      remote = merged;
+      if (localHadExtra) pushCnt();
+    }
+  }
 
   // Firebase echoes our own writes back through this same listener — ignore that,
   // or every keystroke's eventual sync would rebuild the table and kick the
@@ -1694,55 +1745,22 @@ function loadCntFromDB(data) {
   const incoming = JSON.stringify(remote);
   if (window._cntLoaded && incoming === window._lastPushedCnt) return;
 
-  // On the very first load, compare against the localStorage backup too (covers
-  // a device that closed before an earlier save finished syncing). After that,
-  // compare against whatever is already in memory — which is what makes a
-  // genuine update from another device actually show up here live.
   const wasAlreadyLoaded = window._cntLoaded;
   const prevCntSnapshot = wasAlreadyLoaded ? JSON.stringify(cntData) : null;
-
-  let local = cntData;
-  if (!window._cntLoaded) {
-    try {
-      const ls = JSON.parse(localStorage.getItem('qg-contagem') || 'null');
-      if (ls) { local = migrateFlat(ls) || {}; foldLegacyCiclo(local); sanitizeCicloKeys(local); }
-    } catch(e) {}
-  }
   window._cntLoaded = true;
 
-  // Cell-level merge: take the union of every planta+linha cell from both sides.
-  // This is the fix that actually matters when two people count different LINE
-  // ranges of the same parcela+ciclo — comparing "which side has more cells
-  // overall" (the old approach) would silently throw away one person's entire
-  // set of columns just because the other person had typed more cells elsewhere.
-  const merged = {};
-  let localHadExtra = false;
-  const allParcelas = new Set([...Object.keys(remote), ...Object.keys(local||{})]);
-  allParcelas.forEach(parc => {
-    const rParc = remote[parc] || {};
-    const lParc = (local && local[parc]) || {};
-    merged[parc] = {};
-    const allCiclos = new Set([...Object.keys(rParc), ...Object.keys(lParc)]);
-    allCiclos.forEach(ciclo => {
-      const rRows = (rParc[ciclo] && rParc[ciclo].rows) || {};
-      const lRows = (lParc[ciclo] && lParc[ciclo].rows) || {};
-      const rows = {};
-      const allP = new Set([...Object.keys(rRows), ...Object.keys(lRows)]);
-      allP.forEach(p => {
-        const rRow = rRows[p] || {};
-        const lRow = lRows[p] || {};
-        rows[p] = { ...lRow, ...rRow }; // remote wins only where both sides have the exact same cell
-        Object.keys(lRow).forEach(l => { if (rRow[l] === undefined) localHadExtra = true; });
-      });
-      merged[parc][ciclo] = { rows };
-    });
+  cntData = remote;
+
+  // Re-apply any cells queued but not yet flushed to the server, so an in-flight
+  // keystroke never visually reverts while its own debounced push is still pending.
+  Object.values(pendingCntCells).forEach(({parc, ck, p, l, val}) => {
+    if (!cntData[parc]) cntData[parc] = {};
+    if (!cntData[parc][ck]) cntData[parc][ck] = { rows: {} };
+    if (!cntData[parc][ck].rows[p]) cntData[parc][ck].rows[p] = {};
+    cntData[parc][ck].rows[p][l] = val;
   });
 
-  cntData = merged;
   try { localStorage.setItem('qg-contagem', JSON.stringify(cntData)); } catch(e) {}
-  // If local had any cells the server didn't have yet, push them back up —
-  // per-cell, so this never overwrites anything another device contributed.
-  if (localHadExtra) pushCnt();
 
   // Signal a genuine update from another device (not the first load on this
   // device, and not just this device's own edit echoing back) with a short beep.
