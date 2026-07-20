@@ -1061,7 +1061,7 @@ function importData(raw) {
     const rows=JSON.parse(raw); if(!Array.isArray(rows)) throw new Error();
     if(!confirm(`Importar ${rows.length} parcelas? Os dados atuais serão substituídos.`)) return;
     document.getElementById('cardsList').innerHTML=''; cardId=0;
-    rows.forEach(r=>addCard(r.nome||'',r.linhas||'',r.contadas||'',r.cachos||'',r.bagas||'',r.peso||''));
+    rows.forEach(r=>addCard(r.nome||'',r.linhas||'',r.contadas||'',r.cachos||'',r.bagas||'',r.peso||'',r.diametro||'',r.comprimento||'',r.pesobaga||'',r.diaideal||'',r.descCampo||'',r.descPacking||''));
     pushToDB(); switchTab('parcelas'); showToast('✅ Dados importados!');
   } catch(e) { showToast('⚠️ JSON inválido'); }
 }
