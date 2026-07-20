@@ -1493,13 +1493,14 @@ function cntCellChange(input) {
 
   cntRecalcSummary();
 
-  // Save to localStorage immediately (no debounce) so data survives an abrupt close
-  // even if the network push below never completes.
-  try { localStorage.setItem('qg-contagem', JSON.stringify(cntData)); } catch(e) {}
-
   // Queue this exact cell for a batched, debounced push — writing only this cell's
   // Firebase path (not the whole grid) so another device counting different lines
   // of the same parcela+ciclo never gets its columns overwritten by this one.
+  // The localStorage save also happens in this same debounced flush now (see
+  // below) instead of on every keystroke — serializing the whole Contagem tree
+  // on every single character typed was what was making the app hang as the
+  // day's data grew. flushAllLocal() (tab hidden/closed) still covers abrupt
+  // closes in between flushes.
   queueCellPush(parc, ck, p, l, val);
 }
 
@@ -1511,9 +1512,10 @@ function queueCellPush(parc, ck, p, l, val) {
   cntPushTimer = setTimeout(flushCellPushes, 800);
 }
 function flushCellPushes() {
-  if (!window._fbReady) return;
   const items = Object.values(pendingCntCells);
   pendingCntCells = {};
+  try { localStorage.setItem('qg-contagem', JSON.stringify(cntData)); } catch(e) {}
+  if (!window._fbReady) return;
   items.forEach(({parc, ck, p, l, val}) => {
     try { window._fbSetCell(parc, ck, p, l, val); } catch(e) {}
   });
@@ -1537,10 +1539,14 @@ function saveCnt() {
 function cntRecalcSummary() {
   const parc = document.getElementById('cntParcela').value;
   const cells = document.querySelectorAll('.cnt-cell');
-  let sum = 0, count = 0;
+  let sum = 0, count = 0, zeroCount = 0, totalFilled = 0;
   cells.forEach(inp => {
     const v = parseFloat(inp.value);
     if (!isNaN(v)) { sum += v; count++; }
+    if (inp.value !== '' && inp.value !== null) {
+      totalFilled++;
+      if (v === 0) zeroCount++;
+    }
   });
   const media = count > 0 ? sum / count : null;
   const totalLinhasEl = document.getElementById('cntTotalLinhas');
@@ -1567,13 +1573,6 @@ function cntRecalcSummary() {
     mediaLinhaEl.textContent = mediaLinha;
   }
   // Plantas com 0 cacho e % sobre total contado
-  let zeroCount = 0, totalFilled = 0;
-  document.querySelectorAll('.cnt-cell').forEach(inp => {
-    if (inp.value !== '' && inp.value !== null) {
-      totalFilled++;
-      if (parseFloat(inp.value) === 0) zeroCount++;
-    }
-  });
   const zeroPct = totalFilled > 0 ? ((zeroCount / totalFilled) * 100) : null;
   const zeroEl  = document.getElementById('cntZeroPlants');
   const pctEl   = document.getElementById('cntZeroPct');
