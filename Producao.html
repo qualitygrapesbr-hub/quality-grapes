@@ -1056,6 +1056,27 @@ function showToast(msg) {
   clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2200);
 }
 
+// Short two-tone beep — signals that data genuinely changed from another device
+// (not just this device's own edits echoing back). Synthesized directly, no
+// external audio file needed, so it works even offline.
+function playUpdateBeep() {
+  try {
+    const ctx = window._beepCtx || (window._beepCtx = new (window.AudioContext || window.webkitAudioContext)());
+    const now = ctx.currentTime;
+    [880, 1175].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, now + i*0.12);
+      gain.gain.exponentialRampToValueAtTime(0.15, now + i*0.12 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + i*0.12 + 0.15);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(now + i*0.12); osc.stop(now + i*0.12 + 0.16);
+    });
+  } catch(e) {}
+}
+
 function fixBars() {
   const h=document.querySelector('.header').getBoundingClientRect().height;
   const tb=document.querySelector('.total-bar'); tb.style.top=Math.ceil(h)+'px';
@@ -1657,6 +1678,9 @@ function loadCntFromDB(data) {
   // a device that closed before an earlier save finished syncing). After that,
   // compare against whatever is already in memory — which is what makes a
   // genuine update from another device actually show up here live.
+  const wasAlreadyLoaded = window._cntLoaded;
+  const prevCntSnapshot = wasAlreadyLoaded ? JSON.stringify(cntData) : null;
+
   let local = cntData;
   if (!window._cntLoaded) {
     try {
@@ -1699,6 +1723,10 @@ function loadCntFromDB(data) {
   // If local had any cells the server didn't have yet, push them back up —
   // per-cell, so this never overwrites anything another device contributed.
   if (localHadExtra) pushCnt();
+
+  // Signal a genuine update from another device (not the first load on this
+  // device, and not just this device's own edit echoing back) with a short beep.
+  if (wasAlreadyLoaded && prevCntSnapshot !== JSON.stringify(cntData)) playUpdateBeep();
 
   // Live-refresh the visible grid so a count entered on another device actually
   // shows up here without needing a reload — preserving focus/cursor in case
