@@ -830,7 +830,11 @@ function addCard(parcela='', linhas='', contadas='', cachos='', bagas='', peso='
 
 function delCard(id) {
   const el = document.getElementById(`card-${id}`);
-  if (el) el.remove();
+  if (!el) return;
+  const nomeInput = el.querySelector('[data-f="nome"]');
+  const nome = (nomeInput && nomeInput.value) ? nomeInput.value : 'esta parcela';
+  if (!confirm(`Remover ${nome}? Essa ação não pode ser desfeita.`)) return;
+  el.remove();
   recalc();
   pushToDB();
 }
@@ -948,8 +952,9 @@ function getState() {
 }
 
 function pushToDB() {
-  if (!window._fbReady) return;
   const state = getState();
+  try { localStorage.setItem('qg-parcelas', JSON.stringify(state)); } catch(e) {}
+  if (!window._fbReady) return;
   window._lastPushedState = JSON.stringify(state);
   window._fbSet(state).then(() => {
     const now = new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
@@ -959,11 +964,26 @@ function pushToDB() {
 
 function renderFromDB(data) {
   if (ignoreRender) return;
-  if (!data || !Array.isArray(data)) {
-    // First time — load defaults
+  if (!data || !Array.isArray(data) || data.length === 0) {
+    // Treat "no data" and "empty array" the same way: never let an empty remote
+    // state silently wipe cards this device already has on screen — that's
+    // almost certainly an accidental deletion or a bug somewhere else, not
+    // something to propagate and destroy everyone else's view too.
     if (document.querySelectorAll('.card').length === 0) {
-      DEFAULTS.forEach(([p,l]) => addCard(p,l));
-      pushToDB();
+      // Before giving up and loading generic DEFAULTS, check this device's own
+      // local backup — it may still hold real data that never got wiped here.
+      let local = null;
+      try { local = JSON.parse(localStorage.getItem('qg-parcelas') || 'null'); } catch(e) {}
+      if (Array.isArray(local) && local.length > 0) {
+        ignoreRender = true;
+        local.forEach(r => addCard(r.nome||'', r.linhas||'', r.contadas||'', r.cachos||'', r.bagas||'', r.peso||'', r.diametro||'', r.comprimento||'', r.pesobaga||'', r.diaideal||'', r.descCampo||'', r.descPacking||''));
+        recalc();
+        ignoreRender = false;
+        pushToDB();
+      } else {
+        DEFAULTS.forEach(([p,l]) => addCard(p,l));
+        pushToDB();
+      }
     }
     return;
   }
