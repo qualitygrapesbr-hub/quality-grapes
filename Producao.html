@@ -670,6 +670,14 @@ onValue(dbMetaRef, (snapshot) => {
 });
 
 window._fbSetCnt = (data) => set(dbCntRef, data);
+// Write/remove a single cell instead of the whole grid. This is what actually lets
+// two people count different lines of the SAME parcela+ciclo at once without one
+// device's push wiping out the other's columns — Firebase merges separate paths
+// automatically, but a single set() on the whole tree always overwrites everything.
+window._fbSetCell = (parc, ck, p, l, val) => {
+  const cellRef = ref(db, `contagem/${parc}/${ck}/rows/${p}/${l}`);
+  return (val === '' || val === null || val === undefined) ? remove(cellRef) : set(cellRef, val);
+};
 onValue(dbCntRef, (snapshot) => {
   window._cntDB = snapshot.val() || {};
   loadCntFromDB(window._cntDB);
@@ -1441,9 +1449,26 @@ function cntCellChange(input) {
   // even if the network push below never completes.
   try { localStorage.setItem('qg-contagem', JSON.stringify(cntData)); } catch(e) {}
 
-  // Firebase push stays debounced (network calls are expensive to fire on every keystroke)
-  clearTimeout(window._cntPushTimer);
-  window._cntPushTimer = setTimeout(pushCnt, 800);
+  // Queue this exact cell for a batched, debounced push — writing only this cell's
+  // Firebase path (not the whole grid) so another device counting different lines
+  // of the same parcela+ciclo never gets its columns overwritten by this one.
+  queueCellPush(parc, ck, p, l, val);
+}
+
+let pendingCntCells = {};
+let cntPushTimer = null;
+function queueCellPush(parc, ck, p, l, val) {
+  pendingCntCells[`${parc}|${ck}|${p}|${l}`] = { parc, ck, p, l, val };
+  clearTimeout(cntPushTimer);
+  cntPushTimer = setTimeout(flushCellPushes, 800);
+}
+function flushCellPushes() {
+  if (!window._fbReady) return;
+  const items = Object.values(pendingCntCells);
+  pendingCntCells = {};
+  items.forEach(({parc, ck, p, l, val}) => {
+    try { window._fbSetCell(parc, ck, p, l, val); } catch(e) {}
+  });
 }
 
 function saveCnt() {
@@ -1508,15 +1533,24 @@ function cntRecalcSummary() {
   if (pctEl)  pctEl.textContent  = zeroPct !== null ? zeroPct.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1}) + '%' : '—';
 }
 
+function safeCall(fn) { try { return Promise.resolve(fn()); } catch (e) { return Promise.reject(e); } }
+
 function pushCnt() {
   try { localStorage.setItem('qg-contagem', JSON.stringify(cntData)); } catch(e) {}
   window._lastPushedCnt = JSON.stringify(cntData);
   if (!window._fbReady) return Promise.reject(new Error('offline'));
-  try {
-    return Promise.resolve(window._fbSetCnt(cntData));
-  } catch (e) {
-    return Promise.reject(e);
-  }
+  const writes = [];
+  Object.keys(cntData).forEach(parc => {
+    Object.keys(cntData[parc] || {}).forEach(ck => {
+      const rows = (cntData[parc][ck] && cntData[parc][ck].rows) || {};
+      Object.keys(rows).forEach(p => {
+        Object.keys(rows[p] || {}).forEach(l => {
+          writes.push(safeCall(() => window._fbSetCell(parc, ck, p, l, rows[p][l])));
+        });
+      });
+    });
+  });
+  return Promise.all(writes);
 }
 
 // Save every local data structure to localStorage right away — cheap, synchronous,
@@ -1540,12 +1574,11 @@ function forceSync() {
   showToast('🔄 Sincronizando...');
   clearTimeout(pushTimer);
   clearTimeout(window._dadosPushTimer);
-  clearTimeout(window._cntPushTimer);
-  const safeCall = (fn) => { try { return Promise.resolve(fn()); } catch (e) { return Promise.reject(e); } };
+  clearTimeout(cntPushTimer);
   const tasks = [
     safeCall(() => window._fbSet(getState())),
     safeCall(() => window._fbSetDados(getDadosState())),
-    safeCall(() => window._fbSetCnt(cntData)),
+    pushCnt(),
     safeCall(() => window._fbSetHist(historicoData)),
   ];
   Promise.all(tasks).then(() => {
@@ -1633,13 +1666,13 @@ function loadCntFromDB(data) {
   }
   window._cntLoaded = true;
 
-  // Merge instead of blindly trusting Firebase: for every parcela+ciclo, keep
-  // whichever side (local vs remote) has more filled cells. This is what protects
-  // a count that was typed and "saved" but never actually finished syncing (e.g.
-  // due to a weak signal in the field) from being silently erased by an older
-  // Firebase snapshot the moment the app reloads and reconnects.
+  // Cell-level merge: take the union of every planta+linha cell from both sides.
+  // This is the fix that actually matters when two people count different LINE
+  // ranges of the same parcela+ciclo — comparing "which side has more cells
+  // overall" (the old approach) would silently throw away one person's entire
+  // set of columns just because the other person had typed more cells elsewhere.
   const merged = {};
-  let localWasRicher = false;
+  let localHadExtra = false;
   const allParcelas = new Set([...Object.keys(remote), ...Object.keys(local||{})]);
   allParcelas.forEach(parc => {
     const rParc = remote[parc] || {};
@@ -1647,18 +1680,25 @@ function loadCntFromDB(data) {
     merged[parc] = {};
     const allCiclos = new Set([...Object.keys(rParc), ...Object.keys(lParc)]);
     allCiclos.forEach(ciclo => {
-      const rCells = countCells(rParc[ciclo]);
-      const lCells = countCells(lParc[ciclo]);
-      if (lCells > rCells) { merged[parc][ciclo] = lParc[ciclo]; localWasRicher = true; }
-      else { merged[parc][ciclo] = rParc[ciclo] || lParc[ciclo]; }
+      const rRows = (rParc[ciclo] && rParc[ciclo].rows) || {};
+      const lRows = (lParc[ciclo] && lParc[ciclo].rows) || {};
+      const rows = {};
+      const allP = new Set([...Object.keys(rRows), ...Object.keys(lRows)]);
+      allP.forEach(p => {
+        const rRow = rRows[p] || {};
+        const lRow = lRows[p] || {};
+        rows[p] = { ...lRow, ...rRow }; // remote wins only where both sides have the exact same cell
+        Object.keys(lRow).forEach(l => { if (rRow[l] === undefined) localHadExtra = true; });
+      });
+      merged[parc][ciclo] = { rows };
     });
   });
 
   cntData = merged;
   try { localStorage.setItem('qg-contagem', JSON.stringify(cntData)); } catch(e) {}
-  // If local data turned out to have more than what was on the server, push it
-  // back up right away so the recovery actually gets synced.
-  if (localWasRicher) pushCnt();
+  // If local had any cells the server didn't have yet, push them back up —
+  // per-cell, so this never overwrites anything another device contributed.
+  if (localHadExtra) pushCnt();
 
   // Live-refresh the visible grid so a count entered on another device actually
   // shows up here without needing a reload — preserving focus/cursor in case
